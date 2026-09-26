@@ -1,0 +1,21 @@
+# Configuração mínima do Supabase CLI para o Andamento.
+# Rode `supabase init` se quiser o arquivo completo; as seções abaixo são as
+# que importam para este projeto.
+project_id = "andamento"
+
+[auth]
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173"]
+
+[functions.consultar-processo]
+verify_jwt = true
+
+[functions.testar-datajud]
+verify_jwt = true
+
+[functions.gerar-mensagem]
+verify_jwt = true
+
+# Chamada pelo pg_cron com o cabeçalho x-cron-secret (sem JWT de usuário)
+[functions.rotina-diaria]
+verify_jwt = false
