@@ -67,3 +67,11 @@ Deno.test("Datajud: hash estável", async () => {
   assertEquals(await hashMovimento(m), await hashMovimento({ ...m }));
   assert((await hashMovimento(m)) !== (await hashMovimento({ ...m, codigo: 52 })));
 });
+
+import { montarHtml } from "./email.ts";
+
+Deno.test("E-mail: HTML escapa o texto e mantém quebras de linha", () => {
+  const html = montarHtml("Olá <b>Maria</b> & cia\n\nEscritório");
+  assert(html.includes("Olá &lt;b&gt;Maria&lt;/b&gt; &amp; cia<br><br>Escritório"));
+  assert(!html.includes("<b>Maria"));
+});

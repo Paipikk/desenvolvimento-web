@@ -25,7 +25,8 @@ andamento/
         ├── _shared/              # datajud, cnj, tribunais, relevancia, ia, sincronizar (+ testes)
         ├── consultar-processo/   # botão "Consultar agora"
         ├── testar-datajud/       # teste manual da API (não grava nada)
-        ├── gerar-mensagem/       # gera/regenera texto (ou prévia)
+        ├── gerar-mensagem/       # gera/regenera texto, cria mensagem de movimentação antiga, prévia
+        ├── enviar-email/         # envia mensagens por e-mail (Resend), uma ou várias
         └── rotina-diaria/        # chamada pelo cron
 ```
 
@@ -110,6 +111,56 @@ processo, a movimentação técnica e a mensagem, lado a lado (empilhados no cel
 - **Aprovar várias de uma vez:** selecione e aprove; elas vão para *Aprovadas*. O envio pelo WhatsApp é feito uma a
   uma, porque o navegador bloqueia várias abas abertas de uma vez.
 
+## Envio por e-mail
+
+- Botão **✉️ Enviar por e-mail** em cada cartão (só aparece se o cliente tiver e-mail e o Resend estiver configurado).
+- **Envio em lote:** selecione várias mensagens (em *Para revisar*, *Baixa relevância* ou *Aprovadas*) e clique em
+  *Enviar por e-mail*. Clientes sem e-mail são pulados.
+- O e-mail sai com o nome do escritório como remetente, assunto "Novidade no processo: {apelido}" e o texto da
+  mensagem. Se o escritório preencher *E-mail para respostas* em Configurações, as respostas vão para lá.
+- A mensagem fica como *enviada* com `canal = 'email'`; se falhar, o erro aparece no cartão e ela continua na fila.
+- **Modo teste (`EMAIL_TESTE_DESTINO`):** todo e-mail vai para esse endereço, com o assunto
+  `[TESTE → cliente@...]`. Uma faixa amarela na fila avisa que o modo teste está ligado.
+- No histórico do processo, movimentações sem mensagem têm o link **Criar mensagem para o cliente**: a IA escreve e a
+  mensagem entra na fila (útil para avisar de algo antigo, e para testar).
+
+## Como testar (passo a passo, sem instalar Docker)
+
+1. **Supabase:** crie um projeto gratuito em <https://supabase.com>. Anote o *Project ref* e, em
+   *Project Settings → API*, a URL e a chave `anon`.
+2. **Resend:** crie uma conta gratuita em <https://resend.com> com o **seu e-mail** e gere uma API key
+   (*API Keys → Create*). Não precisa verificar domínio para testar.
+3. **Banco e funções** (na pasta `andamento/`):
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref <ref>
+   npx supabase db push
+   cp supabase/functions/.env.example supabase/functions/.env
+   ```
+   Preencha o `.env`: `DATAJUD_API_KEY` (chave pública do CNJ), `ANTHROPIC_API_KEY` (opcional),
+   `RESEND_API_KEY`, e **`EMAIL_TESTE_DESTINO` = o e-mail da sua conta Resend**. Depois:
+   ```bash
+   npx supabase secrets set --env-file supabase/functions/.env
+   npx supabase functions deploy consultar-processo testar-datajud gerar-mensagem enviar-email
+   npx supabase functions deploy rotina-diaria --no-verify-jwt
+   ```
+4. **Frontend:** `cp .env.example .env`, preencha URL e chave anon, `npm install` e `npm run dev`.
+   Abra <http://localhost:5173>. (Para não depender do e-mail de confirmação, desligue *Confirm email* em
+   *Authentication → Providers → Email* enquanto testa.)
+5. **Roteiro:**
+   1. Crie a conta do escritório.
+   2. *Configurações → Testar conexão com o Datajud*: cole um número real (ex.: `0000832-35.2018.4.01.3202`, TRF1) e
+      veja as movimentações.
+   3. Cadastre um cliente **com e-mail** (pode ser um e-mail qualquer — no modo teste nada vai para ele).
+   4. Cadastre um processo real para esse cliente. A primeira consulta roda sozinha.
+   5. No histórico do processo, clique em **Criar mensagem para o cliente** numa movimentação.
+   6. Vá em *Mensagens*: a faixa amarela confirma o modo teste. Clique em **✉️ Enviar por e-mail**.
+   7. Confira sua caixa de entrada (e o spam): chega um e-mail com assunto `[TESTE → email-do-cliente] ...`.
+      O painel do Resend (*Emails*) também mostra o envio.
+   8. A mensagem vai para a aba *Enviadas* como "enviada por e-mail". Repita com várias e teste o envio em lote.
+6. **Para enviar de verdade para clientes:** verifique um domínio no Resend (*Domains*), defina
+   `EMAIL_REMETENTE=avisos@seudominio.com.br`, **apague** `EMAIL_TESTE_DESTINO` e rode `supabase secrets set` de novo.
+
 ## Como rodar
 
 ### 1. Supabase
@@ -136,13 +187,14 @@ execução.)
 ```bash
 cp supabase/functions/.env.example supabase/functions/.env   # preencha
 supabase secrets set --env-file supabase/functions/.env
-supabase functions deploy consultar-processo testar-datajud gerar-mensagem
+supabase functions deploy consultar-processo testar-datajud gerar-mensagem enviar-email
 supabase functions deploy rotina-diaria --no-verify-jwt
 ```
 
 - `DATAJUD_API_KEY`: chave pública divulgada em <https://datajud-wiki.cnj.jus.br/api-publica/acesso>
 - `ANTHROPIC_API_KEY`: chave da API da Anthropic (opcional; sem ela usa texto-modelo)
 - `CRON_SECRET`: o mesmo valor de `andamento_cron_secret`
+- `RESEND_API_KEY`, `EMAIL_REMETENTE`, `EMAIL_TESTE_DESTINO`: envio por e-mail (veja "Como testar")
 
 ### 3. Frontend
 
@@ -164,7 +216,7 @@ deno test supabase/functions/_shared/   # validação CNJ, tribunais, relevânci
 
 ## Preparado para depois (não implementado)
 
-- **Envio automático pela API oficial do WhatsApp:** `mensagens.canal` (`whatsapp_link` | `whatsapp_api`) e o fluxo
+- **Envio automático pela API oficial do WhatsApp:** `mensagens.canal` (`whatsapp_link` | `whatsapp_api` | `email`) e o fluxo
   de status já separam *aprovada* de *enviada*; basta um worker que envie as aprovadas.
 - **Cobrança/assinatura:** `escritorios.plano` e `plano_expira_em` (não editáveis pelo navegador).
 - **Portal do cliente:** `clientes.portal_ativo`; as mensagens enviadas já formam o histórico a exibir.

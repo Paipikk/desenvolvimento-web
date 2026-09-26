@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { supabase } from "../lib/supabase";
+import { chamarFuncao, supabase } from "../lib/supabase";
 import type { Movimentacao, Processo } from "../lib/tipos";
 import { Carregando, EstadoVazio, EtiquetaStatus, Girando, Modal } from "../components/ui";
 import ProcessoForm from "../components/ProcessoForm";
@@ -26,6 +26,7 @@ export default function ProcessoDetalhe() {
   const [editando, setEditando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
   const [mostrarBaixa, setMostrarBaixa] = useState(true);
+  const [criandoMsg, setCriandoMsg] = useState<string | null>(null);
   const autoConsulta = useRef(false);
 
   const carregar = useCallback(async () => {
@@ -74,6 +75,20 @@ export default function ProcessoDetalhe() {
       consultar();
     }
   }, [params, setParams, consultar]);
+
+  // Cria a mensagem de uma movimentação que ainda não tem (ex.: histórico antigo)
+  async function criarMensagem(movId: string) {
+    setCriandoMsg(movId);
+    try {
+      const r = await chamarFuncao<{ aviso?: string }>("gerar-mensagem", { movimentacao_id: movId });
+      toast(r.aviso ? `Mensagem criada na fila (${r.aviso})` : "Mensagem criada. Ela está na fila de mensagens.", r.aviso ? "info" : "sucesso");
+      carregar();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), "erro");
+    } finally {
+      setCriandoMsg(null);
+    }
+  }
 
   async function alternarAtivo() {
     if (!processo) return;
@@ -159,10 +174,18 @@ export default function ProcessoDetalhe() {
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                   {m.codigo !== null && <span>Código {m.codigo}</span>}
                   {m.relevancia === "baixa" && <span className="etiqueta bg-slate-100 text-slate-500">baixa relevância</span>}
-                  {m.mensagens && (
+                  {m.mensagens ? (
                     <Link to="/fila" className="inline-flex items-center gap-1 hover:underline">
                       Mensagem: <EtiquetaStatus status={m.mensagens.status} />
                     </Link>
+                  ) : (
+                    <button
+                      className="text-marca-700 hover:underline disabled:opacity-50"
+                      onClick={() => criarMensagem(m.id)}
+                      disabled={criandoMsg !== null}
+                    >
+                      {criandoMsg === m.id ? "Criando mensagem…" : "✉️ Criar mensagem para o cliente"}
+                    </button>
                   )}
                 </div>
               </li>

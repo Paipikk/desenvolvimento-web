@@ -41,6 +41,7 @@ function DadosEscritorio() {
   const [telefone, setTelefone] = useState(escritorio?.telefone ? formatarTelefone(escritorio.telefone) : "");
   const [assinatura, setAssinatura] = useState(escritorio?.assinatura ?? "");
   const [horario, setHorario] = useState(escritorio?.horario_consulta ?? 7);
+  const [emailResposta, setEmailResposta] = useState(escritorio?.email_resposta ?? "");
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
 
@@ -58,6 +59,7 @@ function DadosEscritorio() {
         telefone: normalizarTelefone(telefone) || null,
         assinatura: assinatura.trim() || null,
         horario_consulta: horario,
+        email_resposta: emailResposta.trim() || null,
       })
       .eq("id", escritorio.id);
     setSalvando(false);
@@ -98,6 +100,20 @@ function DadosEscritorio() {
             />
             <p className="mt-1 text-xs text-slate-500">
               Vai no fim de toda mensagem. Se ficar em branco, usamos o nome do escritório. Prévia: <em>{assinaturaPrevia}</em>
+            </p>
+          </div>
+          <div>
+            <label className="rotulo" htmlFor="e-resp">E-mail para respostas dos clientes</label>
+            <input
+              id="e-resp"
+              type="email"
+              className="campo"
+              placeholder="contato@seuescritorio.com.br"
+              value={emailResposta}
+              onChange={(e) => setEmailResposta(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Nas mensagens enviadas por e-mail, quando o cliente clicar em “Responder”, a resposta vem para este endereço.
             </p>
           </div>
           <div>

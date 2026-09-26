@@ -13,6 +13,9 @@ verify_jwt = true
 [functions.testar-datajud]
 verify_jwt = true
 
+[functions.enviar-email]
+verify_jwt = true
+
 [functions.gerar-mensagem]
 verify_jwt = true
 

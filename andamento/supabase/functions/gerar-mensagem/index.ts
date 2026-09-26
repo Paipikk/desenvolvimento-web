@@ -1,8 +1,10 @@
 // Gera (ou regenera) a mensagem de WhatsApp para uma movimentação.
 //
-// Dois modos:
+// Três modos:
 //  1) { mensagem_id }              -> regenera o texto de uma mensagem pendente e salva
-//  2) { nome_cliente, apelido, nome_movimentacao, complemento, data_hora }
+//  2) { movimentacao_id }          -> cria a mensagem de uma movimentação que ainda não tem
+//                                     (ex.: movimentações antigas do histórico)
+//  3) { nome_cliente, apelido, nome_movimentacao, complemento, data_hora }
 //                                  -> só devolve uma prévia (nada é gravado)
 import { corsHeaders, erro, json } from "../_shared/cors.ts";
 import { clienteAdmin, clienteUsuario, usuarioLogado } from "../_shared/supabase.ts";
@@ -24,6 +26,16 @@ type MensagemCompleta = {
       clientes: { nome: string } | null;
     } | null;
   } | null;
+};
+
+type MovimentacaoCompleta = {
+  id: string;
+  nome: string;
+  complemento: string | null;
+  codigo: number | null;
+  data_hora: string;
+  mensagens: { id: string } | null;
+  processos: { numero_cnj: string; apelido: string | null; clientes: { nome: string } | null } | null;
 };
 
 Deno.serve(async (req) => {
@@ -80,6 +92,42 @@ Deno.serve(async (req) => {
       .single();
     if (error) return erro(`Não foi possível salvar: ${error.message}`, 500);
     return json({ mensagem: atualizada, aviso: gerada.aviso });
+  }
+
+  if (typeof corpo.movimentacao_id === "string") {
+    const { data: mov } = await sbUsuario
+      .from("movimentacoes")
+      .select("id, nome, complemento, codigo, data_hora, mensagens(id), processos(numero_cnj, apelido, clientes(nome))")
+      .eq("id", corpo.movimentacao_id)
+      .maybeSingle<MovimentacaoCompleta>();
+    if (!mov?.processos) return erro("Movimentação não encontrada.", 404);
+    if (mov.mensagens) return erro("Esta movimentação já tem mensagem. Veja na fila de mensagens.");
+
+    const gerada = await gerarMensagem({
+      nomeCliente: mov.processos.clientes?.nome ?? "cliente",
+      apelidoProcesso: mov.processos.apelido,
+      numeroProcesso: formatarCnj(mov.processos.numero_cnj),
+      nomeMovimentacao: mov.nome,
+      complemento: mov.complemento,
+      dataHora: mov.data_hora,
+      nomeEscritorio: escritorio.nome,
+      assinatura: escritorio.assinatura,
+    });
+    // Pedido explícito do advogado: vai para a fila principal mesmo se for burocrática
+    const { data: criada, error } = await clienteAdmin()
+      .from("mensagens")
+      .insert({
+        movimentacao_id: mov.id,
+        escritorio_id: usuario.escritorio_id,
+        texto_gerado: gerada.texto,
+        texto_final: gerada.texto,
+        gerada_por: gerada.geradaPor,
+        relevancia: "normal",
+      })
+      .select()
+      .single();
+    if (error) return erro(`Não foi possível criar: ${error.message}`, 500);
+    return json({ mensagem: criada, aviso: gerada.aviso });
   }
 
   // Modo prévia

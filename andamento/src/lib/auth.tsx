@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (u) {
       const { data: e } = await supabase
         .from("escritorios")
-        .select("id, nome, oab_responsavel, telefone, assinatura, horario_consulta")
+        .select("id, nome, oab_responsavel, telefone, assinatura, horario_consulta, email_resposta")
         .eq("id", u.escritorio_id)
         .maybeSingle();
       setEscritorio(e ?? null);

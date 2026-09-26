@@ -19,10 +19,17 @@ type Item = Mensagem & {
       numero_cnj: string;
       apelido: string | null;
       tribunal: string;
-      clientes: { id: string; nome: string; telefone: string } | null;
+      clientes: { id: string; nome: string; telefone: string; email: string | null } | null;
     } | null;
   } | null;
 };
+
+type StatusEmail = { configurado: boolean; modo_teste: boolean; destino_teste: string | null; remetente: string };
+type RespostaEnvio = { enviados: number; falhas: number; modo_teste: boolean; resultados: { id: string; ok: boolean; erro?: string }[] };
+
+function enviarPorEmail(ids: string[]): Promise<RespostaEnvio> {
+  return chamarFuncao<RespostaEnvio>("enviar-email", { mensagem_ids: ids });
+}
 
 type Aba = "revisar" | "baixa" | "aprovadas" | "enviadas" | "ignoradas";
 
@@ -62,6 +69,11 @@ export default function Fila() {
   const [contagens, setContagens] = useState<Partial<Record<Aba, number>>>({});
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
   const [processandoLote, setProcessandoLote] = useState(false);
+  const [statusEmail, setStatusEmail] = useState<StatusEmail | null>(null);
+
+  useEffect(() => {
+    chamarFuncao<StatusEmail>("enviar-email", { acao: "status" }).then(setStatusEmail).catch(() => setStatusEmail(null));
+  }, []);
 
   const config = ABAS.find((a) => a.id === aba)!;
 
@@ -82,7 +94,7 @@ export default function Fila() {
     let q = supabase
       .from("mensagens")
       .select(
-        "*, movimentacoes(nome, complemento, data_hora, codigo, processos(id, numero_cnj, apelido, tribunal, clientes(id, nome, telefone)))",
+        "*, movimentacoes(nome, complemento, data_hora, codigo, processos(id, numero_cnj, apelido, tribunal, clientes(id, nome, telefone, email)))",
       )
       .eq("status", config.status)
       .order(config.status === "enviada" ? "enviada_em" : "criado_em", { ascending: false })
@@ -148,15 +160,46 @@ export default function Fila() {
     }
   }
 
-  const selecionavel = aba === "revisar" || aba === "baixa";
+  async function loteEmail() {
+    const ids = [...selecionadas];
+    const semEmail = itens?.filter((i) => selecionadas.has(i.id) && !i.movimentacoes?.processos?.clientes?.email).length ?? 0;
+    if (semEmail === ids.length) return toast("Nenhum dos clientes selecionados tem e-mail cadastrado.", "erro");
+    const aviso = statusEmail?.modo_teste ? `\n\n(Modo teste: tudo vai para ${statusEmail.destino_teste}.)` : "";
+    const extra = semEmail ? `\n${semEmail} sem e-mail cadastrado serão puladas.` : "";
+    if (!confirm(`Enviar ${ids.length - semEmail} mensagem(ns) por e-mail agora?${extra}${aviso}`)) return;
+    setProcessandoLote(true);
+    try {
+      const r = await enviarPorEmail(ids);
+      const primeiraFalha = r.resultados.find((x) => !x.ok)?.erro;
+      toast(
+        `${r.enviados} enviada(s) por e-mail${r.falhas ? `, ${r.falhas} com problema${primeiraFalha ? ` (${primeiraFalha})` : ""}` : ""}.`,
+        r.falhas && !r.enviados ? "erro" : "sucesso",
+      );
+      carregar();
+      carregarContagens();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), "erro");
+    } finally {
+      setProcessandoLote(false);
+    }
+  }
+
+  const selecionavel = aba === "revisar" || aba === "baixa" || aba === "aprovadas";
   const todasSelecionadas = !!itens?.length && selecionadas.size === itens.length;
 
   return (
     <div>
       <Cabecalho
         titulo="Mensagens"
-        subtitulo="Revise, ajuste se quiser e envie pelo WhatsApp. Nada é enviado sem a sua aprovação."
+        subtitulo="Revise, ajuste se quiser e envie pelo WhatsApp ou por e-mail. Nada é enviado sem a sua aprovação."
       />
+
+      {statusEmail?.modo_teste && (
+        <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          🧪 <strong>E-mail em modo teste:</strong> todo envio por e-mail vai para <strong>{statusEmail.destino_teste}</strong>,
+          não para os clientes.
+        </p>
+      )}
 
       <div className="-mx-4 mb-4 overflow-x-auto px-4">
         <div className="flex gap-1 border-b border-slate-200">
@@ -190,11 +233,16 @@ export default function Fila() {
             {selecionadas.size ? `${selecionadas.size} selecionada(s)` : "Selecionar todas"}
           </label>
           {selecionadas.size > 0 && (
-            <div className="ml-auto flex gap-2">
+            <div className="ml-auto flex flex-wrap justify-end gap-2">
               <button className="btn-secundario" onClick={loteIgnorar} disabled={processandoLote}>Ignorar</button>
-              <button className="btn-primario" onClick={loteAprovar} disabled={processandoLote}>
-                {processandoLote && <Girando />} Aprovar selecionadas
-              </button>
+              {statusEmail?.configurado && (
+                <button className="btn-secundario" onClick={loteEmail} disabled={processandoLote}>✉️ Enviar por e-mail</button>
+              )}
+              {aba !== "aprovadas" && (
+                <button className="btn-primario" onClick={loteAprovar} disabled={processandoLote}>
+                  {processandoLote && <Girando />} Aprovar selecionadas
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -202,8 +250,8 @@ export default function Fila() {
 
       {aba === "aprovadas" && !!itens?.length && (
         <p className="mb-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-900">
-          O WhatsApp abre uma conversa por vez, então o envio é feito mensagem a mensagem: toque em “Enviar no WhatsApp”
-          em cada uma.
+          O WhatsApp abre uma conversa por vez, então o envio por WhatsApp é feito mensagem a mensagem. Por e-mail dá
+          para selecionar várias e enviar de uma vez.
         </p>
       )}
 
@@ -227,6 +275,7 @@ export default function Fila() {
                   return n;
                 })
               }
+              emailAtivo={Boolean(statusEmail?.configurado)}
               onRemover={() => remover(item.id)}
               onAtualizar={(d) => atualizarLocal(item.id, d)}
             />
@@ -242,10 +291,12 @@ function CartaoMensagem({
   selecionavel,
   selecionada,
   onSelecionar,
+  emailAtivo,
   onRemover,
   onAtualizar,
 }: {
   item: Item;
+  emailAtivo: boolean;
   selecionavel: boolean;
   selecionada: boolean;
   onSelecionar: (v: boolean) => void;
@@ -256,7 +307,7 @@ function CartaoMensagem({
   const toast = useToast();
   const [editando, setEditando] = useState(false);
   const [texto, setTexto] = useState(item.texto_final);
-  const [ocupado, setOcupado] = useState<"" | "salvar" | "regerar" | "ignorar" | "enviar" | "restaurar">("");
+  const [ocupado, setOcupado] = useState<"" | "salvar" | "regerar" | "ignorar" | "enviar" | "email" | "restaurar">("");
 
   const mov = item.movimentacoes;
   const proc = mov?.processos;
@@ -288,6 +339,7 @@ function CartaoMensagem({
       .update({
         texto_final: textoEnvio,
         status: "enviada",
+        canal: "whatsapp_link",
         aprovada_em: item.aprovada_em ?? agora,
         aprovada_por: usuario?.id,
         enviada_em: agora,
@@ -300,6 +352,30 @@ function CartaoMensagem({
         toast(`Mensagem para ${cliente.nome.split(" ")[0]} marcada como enviada.`);
         onRemover();
       });
+  }
+
+  async function enviarEmail() {
+    if (!cliente?.email) return;
+    setOcupado("email");
+    try {
+      // Se o texto foi editado e não salvo, salva antes para o e-mail sair com a versão certa
+      if (alterado) {
+        const { error } = await supabase.from("mensagens").update({ texto_final: texto }).eq("id", item.id);
+        if (error) throw error;
+      }
+      const r = await enviarPorEmail([item.id]);
+      const res = r.resultados[0];
+      if (!res?.ok) {
+        onAtualizar({ erro_envio: res?.erro ?? "Falha no envio." });
+        return toast(res?.erro ?? "Falha no envio.", "erro");
+      }
+      toast(r.modo_teste ? "E-mail de teste enviado (foi para o endereço de teste)." : `E-mail enviado para ${cliente.email}.`);
+      onRemover();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), "erro");
+    } finally {
+      setOcupado("");
+    }
   }
 
   async function mudarStatus(status: "ignorada" | "pendente") {
@@ -346,7 +422,9 @@ function CartaoMensagem({
             ) : (
               <span className="font-semibold">—</span>
             )}
-            <span className="text-xs text-slate-500">{cliente && formatarTelefone(cliente.telefone)}</span>
+            <span className="text-xs text-slate-500">{cliente && formatarTelefone(cliente.telefone)}
+              {cliente?.email && <span className="hidden sm:inline"> · {cliente.email}</span>}
+            </span>
           </div>
           {proc && (
             <Link to={`/processos/${proc.id}`} className="block truncate text-sm text-slate-600 hover:underline">
@@ -388,7 +466,12 @@ function CartaoMensagem({
             <p className="whitespace-pre-line rounded-lg bg-green-50 p-3 text-sm text-slate-800">{texto}</p>
           )}
           {item.status === "enviada" && (
-            <p className="mt-2 text-xs text-slate-500">Enviada em {dataHora(item.enviada_em)}</p>
+            <p className="mt-2 text-xs text-slate-500">
+              Enviada {item.canal === "email" ? "por e-mail" : "pelo WhatsApp"} em {dataHora(item.enviada_em)}
+            </p>
+          )}
+          {item.erro_envio && item.status !== "enviada" && (
+            <p className="mt-2 text-xs text-red-600">Último envio por e-mail falhou: {item.erro_envio}</p>
           )}
         </section>
       </div>
@@ -412,6 +495,11 @@ function CartaoMensagem({
               </>
             )}
             <button className="btn-secundario" onClick={() => mudarStatus("ignorada")} disabled={!!ocupado}>Ignorar</button>
+            {emailAtivo && cliente?.email && (
+              <button className="btn-secundario" onClick={enviarEmail} disabled={!!ocupado} title={`Enviar para ${cliente.email}`}>
+                {ocupado === "email" ? "Enviando…" : "✉️ Enviar por e-mail"}
+              </button>
+            )}
             <button className="btn-whatsapp" onClick={enviar} disabled={!!ocupado || !cliente}>
               {ocupado === "enviar" && <Girando />}
               {item.status === "aprovada" ? "Enviar no WhatsApp" : "Aprovar e enviar"}

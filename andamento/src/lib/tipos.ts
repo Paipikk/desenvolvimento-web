@@ -8,6 +8,7 @@ export type Escritorio = {
   telefone: string | null;
   assinatura: string | null;
   horario_consulta: number;
+  email_resposta: string | null;
 };
 
 export type Usuario = {
@@ -60,6 +61,8 @@ export type Mensagem = {
   status: StatusMensagem;
   relevancia: Relevancia;
   gerada_por: "ia" | "modelo";
+  canal: "whatsapp_link" | "whatsapp_api" | "email" | null;
+  erro_envio: string | null;
   aprovada_em: string | null;
   enviada_em: string | null;
   criado_em: string;
